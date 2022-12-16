@@ -3,15 +3,13 @@ import openpyxl
 import os
 import sys
 
-path = ''  # path to data folder
-
 
 def validate_argv(argv):
     if argv is not None:
-        if len(argv) == 2:
+        if len(argv) == 3:
             return True
         else:
-            print("Please enter data folder path")
+            print("Please enter data folder path and if you want to reprocess the files")
             return False
     else:
         print("No Arguments")
@@ -23,14 +21,16 @@ def remove_nan_from_df(df):
     return df
 
 
-def read_excels_to_df(files):
-    files_dfs = {}
+def read_excels_to_df(path):
+    processed_path = path + '\\processed\\'
+    files = os.listdir(processed_path)
+    files_dict = {}
     for file in files:
-        if file.endswith(".xlsx") or file.endswith(".xls"):
-            print(file)
-            df = pd.read_excel(path + "\\" + file, None)
-            files_dfs[file] = df
-    return files_dfs
+        if file.endswith(".xlsx") and file != "START.xlsx":
+            file_dfs = pd.read_excel(processed_path + file, None)
+            files_dict[file.split('.')[0]] = file_dfs
+
+    return files_dict
 
 
 def read_start_file(files_dfs):
@@ -51,7 +51,7 @@ def does_sheet_row_only_have_value_in_first_column(row):
 
 def find_all_sheet_rows_with_bolded_value_in_first_column(sheet):
     rows = []
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=6):
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=10):
         if row[0].font.bold:
             rows.append(row[0].row)
 
@@ -60,7 +60,7 @@ def find_all_sheet_rows_with_bolded_value_in_first_column(sheet):
 
 def find_all_sheet_rows_with_value_in_only_first_column(sheet):
     rows = []
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=6):
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=10):
         if does_sheet_row_only_have_value_in_first_column(row):
             rows.append(row[0].row)
 
@@ -87,7 +87,7 @@ def unmerge_whole_sheet(sheet):
 def prep_balance_sheet(sheet: openpyxl.worksheet.worksheet.Worksheet):
     unmerge_whole_sheet(sheet)
     sheet.delete_rows(1, 1)
-    sheet.cell(row=1, column=1).value = "Parameters"
+    sheet.cell(row=1, column=1).value = "PARAMETERS"
     remove_empty_rows(sheet)
 
     # copy all values from column C to column B
@@ -141,6 +141,10 @@ def prep_income_statement(sheet: openpyxl.worksheet.worksheet.Worksheet):
     create_country_header(sheet, 4)
     create_country_header(sheet, 6)
     sheet.delete_rows(2, 1)
+    first_column_only_rows = find_all_sheet_rows_with_value_in_only_first_column(sheet)
+    first_column_bolded_rows = find_all_sheet_rows_with_bolded_value_in_first_column(sheet)
+    copy_first_only_values_to_following_rows(sheet, first_column_only_rows, first_column_bolded_rows)
+    delete_rows(first_column_only_rows, sheet)
 
 
 def prep_management_info(sheet: openpyxl.worksheet.worksheet.Worksheet):
@@ -152,6 +156,12 @@ def prep_management_info(sheet: openpyxl.worksheet.worksheet.Worksheet):
     create_country_header(sheet, 8, has_third_column=True)
     remove_empty_rows(sheet)
     sheet.delete_rows(2, 1)
+    # make cell bold
+    sheet.cell(row=43, column=1).font = openpyxl.styles.fonts.Font(bold=True)
+    first_column_only_rows = find_all_sheet_rows_with_value_in_only_first_column(sheet)
+    first_column_bolded_rows = find_all_sheet_rows_with_bolded_value_in_first_column(sheet)
+    copy_first_only_values_to_following_rows(sheet, first_column_only_rows, first_column_bolded_rows)
+    delete_rows(first_column_only_rows, sheet)
 
 
 def prep_specific_sheet(workbook: openpyxl.Workbook, sheet_name: str):
@@ -167,8 +177,9 @@ def prep_specific_sheet(workbook: openpyxl.Workbook, sheet_name: str):
         print(f"Sheet {sheet_name} will not be processed")
 
 
-def prep_files(files) -> dict:
-    files_dict = {}
+def prep_files(path):
+    files = os.listdir(path)
+    files.remove('processed')
     for file in files:
         if file != "START.xlsx":
             workbook = openpyxl.open(path + "\\" + file)
@@ -178,19 +189,53 @@ def prep_files(files) -> dict:
                 prep_specific_sheet(workbook, sheet.title)
             workbook.save(path + "\\" + 'processed' + "\\" + file)
             workbook.close()
-            file_dfs = pd.read_excel(path + "\\" + 'processed' + "\\" + file, None)
-            files_dict[file.split('.')[0]] = file_dfs;
             print("Done with " + file)
         else:
             os.rename(path + "\\" + file, path + "\\" + 'processed' + "\\" + file)
-    return files_dict
+
+
+def process_standard_cost(key, df):
+    areas = ["U.S. PC 2", "EC/EU PC 2", "BRAZIL PC 2"]
+    pl1_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(1) STANDARD COST"]
+    pl1_row_index = pl1_standard_row.index.item()
+    pl1_units_row = df.loc[pl1_row_index + 1]
+
+    pl2_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(2) STANDARD COST"]
+    pl2_row_index = pl2_standard_row.index.item()
+    pl2_units_row = df.loc[pl2_row_index + 1]
+
+    pl3_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(3) STANDARD COST"]
+    pl3_row_index = pl3_standard_row.index.item()
+    pl3_units_row = df.loc[pl3_row_index + 1]
+
+    for area in areas:
+        costs = int(pl1_standard_row[area]) + int(pl2_standard_row[area]) + int(pl3_standard_row[area])
+        amounts = int(pl1_units_row[area]) + int(pl2_units_row[area]) + int(pl3_units_row[area])
+        variable_cost_per_unit = 0
+        if amounts != 0:
+            variable_cost_per_unit = costs / amounts
+        if variable_cost_per_unit != 0:
+            print(f"{key} {area} costs: {costs} amounts: {amounts} variable cost pre unit: {variable_cost_per_unit}")
+
+
+def process_management_info(files_df):
+    for key in files_df.keys():
+        if key != "START":
+            print(f"Management Info For {key} =======================================================================")
+            df = files_df[key]["Management Info"]
+            process_standard_cost(key, df)
 
 
 if __name__ == '__main__':
     if validate_argv(sys.argv):
         path = sys.argv[1]
-        files = os.listdir(path)
-        files.remove('processed')
-        files_dict = prep_files(files)
-        # df.loc[df["Parameters"] == "TOTAL LIABILITY AND EQUITY"]['BRAZIL']
+        should_process = sys.argv[2]
+        if should_process == "True":
+            prep_files(path)
+
+        files_dict = read_excels_to_df(path)
+
+        # Intra-co.purchase - סכום העברות כספים בהעברת מוצרים
+        # Income statement -  INTRA-COMPANY - כמה נכנס לאיזור בעקבות העברת מוצרים
+        process_management_info(files_dict)
         print("Done with all files")
