@@ -183,7 +183,6 @@ def prep_files(path):
     for file in files:
         if file != "START.xlsx":
             workbook = openpyxl.open(path + "\\" + file)
-            # remove the first sheet
             workbook.remove(workbook.worksheets[0])
             for sheet in workbook.worksheets:
                 prep_specific_sheet(workbook, sheet.title)
@@ -196,21 +195,21 @@ def prep_files(path):
 
 def process_standard_cost(key, df):
     areas = ["U.S. PC 2", "EC/EU PC 2", "BRAZIL PC 2"]
-    pl1_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(1) STANDARD COST"]
-    pl1_row_index = pl1_standard_row.index.item()
-    pl1_units_row = df.loc[pl1_row_index + 1]
 
-    pl2_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(2) STANDARD COST"]
-    pl2_row_index = pl2_standard_row.index.item()
-    pl2_units_row = df.loc[pl2_row_index + 1]
+    plants_number = len(df[df["PARAMETERS"].str.contains('PL\(')])
 
-    pl3_standard_row = df.loc[df["PARAMETERS"] == "MANUFACTURING COST ANALYSIS PL(3) STANDARD COST"]
-    pl3_row_index = pl3_standard_row.index.item()
-    pl3_units_row = df.loc[pl3_row_index + 1]
+    standard_rows = []
+    unit_rows = []
+    for i in range(0, plants_number):
+        pl_i_standard_row = df.loc[df["PARAMETERS"] == f"MANUFACTURING COST ANALYSIS PL({i+1}) STANDARD COST"]
+        pl_i_row_index = pl_i_standard_row.index.item()
+        pl_i_units_row = df.loc[pl_i_row_index + 1]
+        standard_rows.append(pl_i_standard_row)
+        unit_rows.append(pl_i_units_row)
 
     for area in areas:
-        costs = int(pl1_standard_row[area]) + int(pl2_standard_row[area]) + int(pl3_standard_row[area])
-        amounts = int(pl1_units_row[area]) + int(pl2_units_row[area]) + int(pl3_units_row[area])
+        costs = sum(list(map(lambda row: int(row[area]), standard_rows)))
+        amounts = sum(list(map(lambda row: int(row[area]), unit_rows)))
         variable_cost_per_unit = 0
         if amounts != 0:
             variable_cost_per_unit = costs / amounts
